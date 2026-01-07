@@ -1,19 +1,47 @@
 'use server'
 
-import { searchAvailableNumbers, purchasePhoneNumber, updatePhoneNumberWebhooks } from '@/lib/services/twilio-service'
-import { importTwilioNumberToVapi, provisionPhoneNumber, linkAssistantToPhone, createAssistantForPractice } from '@/lib/services/vapi-service'
+import { provisionPhoneNumber, listNumbers } from '@/lib/services/vapi-service'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
 /**
- * Search for available phone numbers via Twilio
+ * Search for available phone numbers (Now via Vapi)
+ * Returns both existing unassigned numbers and a placeholder for new ones.
  */
 export async function searchNumbers(areaCode: string) {
     try {
-        const numbers = await searchAvailableNumbers(areaCode)
-        return { success: true, numbers }
+        // 1. Get existing numbers from Vapi
+        const vapiNumbers = await listNumbers()
+
+        // 2. Filter for numbers that don't have an assistant assigned (available to use)
+        // Note: SDK types might be loose, we'll use 'any' where needed but try to be safe
+        const availableExisting = vapiNumbers.filter((n: any) => !n.assistantId && !n.assistant)
+
+        const results = availableExisting.map((n: any) => ({
+            phoneNumber: n.number || n.id, // Use ID as fallback key
+            friendlyName: n.number || n.name || 'Unassigned Number',
+            locality: 'In Account',
+            region: 'Vapi',
+            vapi_phone_number_id: n.id,
+            isExisting: true
+        }))
+
+        // 3. Add a placeholder for provisioning a NEW number
+        results.push({
+            phoneNumber: `NEW_${areaCode}_${Date.now()}`,
+            friendlyName: `New Number (${areaCode})`,
+            locality: 'Provision New',
+            region: 'Vapi',
+            vapi_phone_number_id: null,
+            isExisting: false
+        } as any)
+
+        return {
+            success: true,
+            numbers: results
+        }
     } catch (error: any) {
         console.error('[Actions] Error searching numbers:', error)
         return { success: false, error: error.message }
@@ -21,12 +49,13 @@ export async function searchNumbers(areaCode: string) {
 }
 
 /**
- * Core provisioning logic (reusable)
+ * Core provisioning logic (Refactored to Vapi-only)
  */
 export async function performProvisioning(
     practiceId: string,
-    selectedNumber: string,
-    practiceName: string
+    areaCode: string,
+    practiceName: string,
+    vapiPhoneNumberId?: string | null
 ) {
     const adminSupabase = createAdminClient()
 
@@ -38,65 +67,27 @@ export async function performProvisioning(
         .eq('is_primary', true)
         .maybeSingle()
 
-    if (existing) {
-        throw new Error('Already has a primary number')
+    if (existing && existing.status === 'active') {
+        throw new Error('Already has an active primary number')
     }
 
-    console.log(`[Provisioning] Starting for ${practiceName} (Number: ${selectedNumber})`)
+    console.log(`[Provisioning] Starting Vapi direct provisioning for ${practiceName} (Area: ${areaCode})`)
 
-    // 2. Purchase from Twilio
-    console.log('[Provisioning] Step 1: Purchasing from Twilio...')
-    const twilioNumber = await purchasePhoneNumber(selectedNumber)
-
-    // 3. Import to Vapi
-    console.log('[Provisioning] Step 2: Importing to Vapi...')
-    const vapiPhone = await importTwilioNumberToVapi(
-        twilioNumber.phoneNumber,
-        process.env.TWILIO_ACCOUNT_SID!,
-        process.env.TWILIO_AUTH_TOKEN!
-    )
-
-    // 4. Create Vapi assistant 
-    console.log('[Provisioning] Step 3: Creating Vapi assistant...')
-    const dbRecord = await createAssistantForPractice(practiceId)
-    const assistantId = dbRecord.vapi_assistant_id
-
-    // 5. Link assistant to phone in Vapi
-    console.log('[Provisioning] Step 4: Linking assistant to number...')
-    await linkAssistantToPhone(vapiPhone.id, assistantId)
-
-    // 6. Update Twilio with Vapi voice URL
-    console.log('[Provisioning] Step 5: Updating Twilio webhooks...')
-    await updatePhoneNumberWebhooks(twilioNumber.sid, vapiPhone.voiceUrl)
-
-    // 7. Update database record with Twilio info and link everything
-    console.log('[Provisioning] Step 6: Updating database record...')
-
-    const { error: updateError } = await adminSupabase
-        .from('phone_numbers')
-        .update({
-            phone_number: twilioNumber.phoneNumber,
-            vapi_phone_number_id: vapiPhone.id,
-            vapi_assistant_id: assistantId,
-            twilio_sid: twilioNumber.sid,
-            twilio_account_sid: process.env.TWILIO_ACCOUNT_SID,
-            status: 'active',
-            is_primary: true
-        })
-        .eq('id', dbRecord.id)
-
-    if (updateError) throw updateError
+    // 2. Provision directly from Vapi
+    // This helper now creates assistant AND buys/links the number
+    const dbRecord = await provisionPhoneNumber(areaCode, practiceId, vapiPhoneNumberId)
 
     console.log('[Provisioning] ✅ Complete!')
-    return { success: true, phoneNumber: twilioNumber.phoneNumber }
+    return { success: true, phoneNumber: dbRecord.phone_number }
 }
 
 /**
  * Complete provisioning flow (Redirect wrapper)
  */
 export async function provisionPhoneNumberComplete(
-    selectedNumber: string,
-    areaCode: string
+    selectedNumber: string, // This might be "AUTO_XXX" or actual number/ID
+    areaCode: string,
+    vapiPhoneNumberId?: string | null
 ) {
     const supabase = await createClient()
     const adminSupabase = createAdminClient()
@@ -113,7 +104,7 @@ export async function provisionPhoneNumberComplete(
     if (!practice) redirect('/dashboard/settings?error=practice_not_found')
 
     try {
-        await performProvisioning(practice.id, selectedNumber, practice.name)
+        await performProvisioning(practice.id, areaCode, practice.name, vapiPhoneNumberId)
         revalidatePath('/dashboard/settings/phone')
     } catch (error: any) {
         console.error('[Provisioning] ❌ Failed:', error)
@@ -126,7 +117,7 @@ export async function provisionPhoneNumberComplete(
 /**
  * Fetch phone numbers for the current practice
  */
-export async function getPhoneNumbers() {
+export async function getPracticePhoneNumbers() {
     const supabase = await createClient()
     const adminSupabase = createAdminClient()
     const { data: { user } } = await supabase.auth.getUser()

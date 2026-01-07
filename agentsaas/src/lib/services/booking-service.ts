@@ -45,7 +45,6 @@ export async function getAvailableSlots(startTime: string, endTime: string, prac
     }
 }
 
-import { sendSMS } from './sms-service'
 
 export async function createBooking(
     name: string,
@@ -112,33 +111,31 @@ export async function createBooking(
         const adminSupabase = createAdminClient()
 
         let patientId = null
+        let actualPracticeId = practiceId
 
         // Try to find by email
         const { data: existingPatient } = await adminSupabase
             .from('patients')
-            .select('id')
+            .select('id, practice_id')
             .eq('email', email)
             .maybeSingle()
 
-        let practiceId = null
-
         if (existingPatient) {
             patientId = existingPatient.id
-            const { data: p } = await adminSupabase.from('patients').select('practice_id').eq('id', patientId).single()
-            if (!practiceId) practiceId = p?.practice_id
+            if (!actualPracticeId) actualPracticeId = existingPatient.practice_id
         } else {
             // Determine practice if not provided
-            if (!practiceId) {
+            if (!actualPracticeId) {
                 const { data: practice } = await adminSupabase
                     .from('practices')
                     .select('id')
                     .limit(1)
                     .single()
 
-                practiceId = practice?.id
+                actualPracticeId = practice?.id
             }
 
-            if (practiceId) {
+            if (actualPracticeId) {
                 // Split name
                 const nameParts = name.trim().split(' ')
                 const firstName = nameParts[0]
@@ -147,7 +144,7 @@ export async function createBooking(
                 const { data: newPatient, error: patError } = await adminSupabase
                     .from('patients')
                     .insert({
-                        practice_id: practiceId,
+                        practice_id: actualPracticeId,
                         first_name: firstName,
                         last_name: lastName,
                         email: email,
@@ -172,7 +169,7 @@ export async function createBooking(
 
         const bookingPayload: any = {
             patient_id: patientId ? patientId : undefined,
-            practice_id: practiceId,
+            practice_id: actualPracticeId,
             start_time: startDate.toISOString(),
             end_time: endDate.toISOString(),
             status: 'confirmed',
@@ -185,32 +182,6 @@ export async function createBooking(
 
         if (dbError) {
             console.error('Failed to persist booking to DB:', dbError)
-        }
-
-        // 3. Send SMS Confirmation (Vapi-Only)
-        if (phone && practiceId) {
-            const timeString = startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone })
-            const dateString = startDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone })
-
-            const message = `Hi ${name.split(' ')[0]}, your appointment is confirmed for ${dateString} at ${timeString}. Reply C to cancel.`
-
-            // Get practice phone number
-            const { data: practicePhone } = await adminSupabase
-                .from('phone_numbers')
-                .select('phone_number')
-                .eq('practice_id', practiceId)
-                .eq('is_primary', true)
-                .single()
-
-            // Fire and forget SMS if we have a number
-            if (practicePhone?.phone_number) {
-                sendSMS({
-                    from: practicePhone.phone_number,
-                    to: phone,
-                    body: message,
-                    practiceId: practiceId
-                }).catch((err: any) => console.error("Background SMS failed:", err))
-            }
         }
 
         return bookingData

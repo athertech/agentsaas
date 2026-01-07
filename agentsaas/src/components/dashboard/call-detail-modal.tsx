@@ -10,7 +10,8 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { PhoneCall, Clock, Calendar, User, Play, Pause, Download, Volume2, Search, FileText, BrainCircuit } from "lucide-react"
+import { PhoneCall, Clock, Calendar, User, Play, Pause, Download, Volume2, Search, FileText, BrainCircuit, Loader2 } from "lucide-react"
+import { useRef, useState, useEffect } from 'react'
 
 export interface TranscriptSegment {
     role: 'assistant' | 'user' | 'system'
@@ -46,7 +47,60 @@ interface CallDetailModalProps {
 }
 
 export function CallDetailModal({ call, isOpen, onClose }: CallDetailModalProps) {
+    const [isPlaying, setIsPlaying] = useState(false)
+    const [currentTime, setCurrentTime] = useState(0)
+    const [duration, setDuration] = useState(0)
+    const [isLoadingAudio, setIsLoadingAudio] = useState(false)
+    const audioRef = useRef<HTMLAudioElement | null>(null)
+
+    useEffect(() => {
+        // Reset player when modal closes or call changes
+        if (!isOpen) {
+            setIsPlaying(false)
+            if (audioRef.current) {
+                audioRef.current.pause()
+                audioRef.current.currentTime = 0
+            }
+        }
+    }, [isOpen, call?.id])
+
     if (!call) return null
+
+    const handleTogglePlay = () => {
+        if (!audioRef.current || !call.recording_url) return
+
+        if (isPlaying) {
+            audioRef.current.pause()
+        } else {
+            setIsLoadingAudio(true)
+            audioRef.current.play().catch(e => {
+                console.error("Playback failed:", e)
+                setIsPlaying(false)
+            }).finally(() => {
+                setIsLoadingAudio(false)
+            })
+        }
+        setIsPlaying(!isPlaying)
+    }
+
+    const handleTimeUpdate = () => {
+        if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime)
+        }
+    }
+
+    const handleLoadedMetadata = () => {
+        if (audioRef.current) {
+            setDuration(audioRef.current.duration)
+        }
+    }
+
+    const handleSliderChange = (value: number[]) => {
+        if (audioRef.current) {
+            audioRef.current.currentTime = value[0]
+            setCurrentTime(value[0])
+        }
+    }
 
     const formatDuration = (seconds: number) => {
         const mins = Math.floor(seconds / 60)
@@ -63,12 +117,34 @@ export function CallDetailModal({ call, isOpen, onClose }: CallDetailModalProps)
         }
     }
 
-    const parseTranscript = (transcriptJson?: string) => {
+    const parseTranscript = (transcriptJson?: string): TranscriptSegment[] => {
         if (!transcriptJson) return []
         try {
-            return JSON.parse(transcriptJson)
+            // Try parsing if it's JSON
+            if (transcriptJson.startsWith('[') || transcriptJson.startsWith('{')) {
+                return JSON.parse(transcriptJson)
+            }
+
+            // Handle plain text with "Speaker: Message" pattern (common in LLM outputs)
+            const lines = transcriptJson.split('\n').filter(l => l.trim())
+            if (lines.some(l => l.match(/^(AI|Assistant|User|Caller|System):/i))) {
+                return lines.map(line => {
+                    const match = line.match(/^(AI|Assistant|User|Caller|System):\s*(.*)/i)
+                    if (match) {
+                        const role = match[1].toLowerCase()
+                        return {
+                            role: (role === 'ai' || role === 'assistant') ? 'assistant' :
+                                (role === 'user' || role === 'caller') ? 'user' : 'system',
+                            content: match[2]
+                        }
+                    }
+                    return { role: 'system', content: line }
+                })
+            }
+
+            // Default fallback
+            return [{ role: 'system', content: transcriptJson }]
         } catch (e) {
-            // Fallback for plain text transcript
             return [{ role: 'system', content: transcriptJson }]
         }
     }
@@ -174,14 +250,52 @@ export function CallDetailModal({ call, isOpen, onClose }: CallDetailModalProps)
                             </div>
                         )}
 
-                        <div className="space-y-3 pt-2">
-                            <Button className="w-full justify-start gap-2 h-11" variant="outline">
-                                <Play className="h-4 w-4" />
-                                Play Recording
+                        <div className="space-y-4 pt-4 border-t border-primary/5">
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
+                                    <span>{formatDuration(Math.floor(currentTime))}</span>
+                                    <span>{formatDuration(Math.floor(duration || call.duration_seconds))}</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max={duration || call.duration_seconds}
+                                    step="1"
+                                    value={currentTime}
+                                    onChange={(e) => handleSliderChange([parseFloat(e.target.value)])}
+                                    className="w-full h-1.5 bg-primary/10 rounded-lg appearance-none cursor-pointer accent-primary hover:accent-primary/80 transition-all"
+                                />
+                            </div>
+
+                            <audio
+                                ref={audioRef}
+                                src={call.recording_url}
+                                onTimeUpdate={handleTimeUpdate}
+                                onLoadedMetadata={handleLoadedMetadata}
+                                onEnded={() => setIsPlaying(false)}
+                                className="hidden"
+                            />
+
+                            <Button
+                                className="w-full justify-center gap-2 h-11 shadow-sm"
+                                variant={isPlaying ? "outline" : "default"}
+                                onClick={handleTogglePlay}
+                                disabled={!call.recording_url || isLoadingAudio}
+                            >
+                                {isLoadingAudio ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : isPlaying ? (
+                                    <><Pause className="h-4 w-4" /> Pause Recording</>
+                                ) : (
+                                    <><Play className="h-4 w-4" /> Play Recording</>
+                                )}
                             </Button>
-                            <Button className="w-full justify-start gap-2 h-11" variant="ghost">
-                                <Download className="h-4 w-4" />
-                                Download Transcript
+
+                            <Button className="w-full justify-center gap-2 h-11" variant="ghost" asChild>
+                                <a href={call.recording_url} download target="_blank" rel="noopener noreferrer">
+                                    <Download className="h-4 w-4" />
+                                    Download Audio
+                                </a>
                             </Button>
                         </div>
                     </div>

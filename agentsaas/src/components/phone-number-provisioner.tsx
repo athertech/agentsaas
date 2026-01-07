@@ -37,13 +37,17 @@ export function PhoneNumberProvisioner() {
         }
     }
 
-    const handleProvision = async (number: string) => {
+    const handleProvision = async (numObj: any) => {
         setError(null)
-        setIsProvisioning(number)
+        setIsProvisioning(numObj.phoneNumber)
 
         try {
             // This will redirect on success
-            await provisionPhoneNumberComplete(number, areaCode)
+            await provisionPhoneNumberComplete(
+                numObj.phoneNumber,
+                areaCode,
+                numObj.vapi_phone_number_id
+            )
         } catch (err: any) {
             setError(err.message || "Failed to provision number")
             setIsProvisioning(null)
@@ -59,7 +63,7 @@ export function PhoneNumberProvisioner() {
                         Choose Your AI Receptionist's Number
                     </CardTitle>
                     <CardDescription>
-                        Search for a local US phone number by area code. We'll set up everything automatically.
+                        Search for a local US phone number by area code. We'll check for any free numbers already in your account first.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -86,41 +90,39 @@ export function PhoneNumberProvisioner() {
 
                     {numbers.length > 0 && (
                         <div className="mt-6 space-y-3">
-                            <h3 className="text-sm font-medium text-muted-foreground">Available Numbers</h3>
+                            <h3 className="text-sm font-medium text-muted-foreground">Available Options</h3>
                             <div className="grid gap-2">
                                 {numbers.map((num) => (
                                     <div
                                         key={num.phoneNumber}
-                                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors group"
+                                        className={`flex items-center justify-between p-3 border rounded-lg transition-colors group ${num.isExisting ? 'bg-primary/5 border-primary/20' : 'hover:bg-muted/50'}`}
                                     >
                                         <div className="flex items-center gap-3">
                                             <span className="text-lg font-mono font-medium tracking-tight">
                                                 {num.friendlyName}
                                             </span>
-                                            <Badge variant="secondary" className="text-[10px] uppercase">
-                                                {num.locality}, {num.region}
+                                            <Badge variant={num.isExisting ? "default" : "secondary"} className="text-[10px] uppercase">
+                                                {num.isExisting ? "Already Owned" : "Vapi Free Tier"}
                                             </Badge>
                                         </div>
                                         <Button
                                             size="sm"
+                                            variant={num.isExisting ? "default" : "outline"}
                                             disabled={isProvisioning !== null}
-                                            onClick={() => handleProvision(num.phoneNumber)}
+                                            onClick={() => handleProvision(num)}
                                         >
                                             {isProvisioning === num.phoneNumber ? (
                                                 <Loader2 className="h-4 w-4 animate-spin" />
                                             ) : (
                                                 <>
                                                     <Plus className="h-4 w-4 mr-2" />
-                                                    Select
+                                                    {num.isExisting ? "Use This Number" : "Provision New"}
                                                 </>
                                             )}
                                         </Button>
                                     </div>
                                 ))}
                             </div>
-                            <p className="text-[11px] text-muted-foreground pt-2">
-                                * Standard Twilio pricing applies (~$1.15/mo for number + call/SMS usage)
-                            </p>
                         </div>
                     )}
                 </CardContent>
@@ -130,15 +132,15 @@ export function PhoneNumberProvisioner() {
                 <div className="flex gap-2 p-3 bg-primary/5 border border-primary/10 rounded-lg">
                     <Check className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                     <div>
-                        <p className="font-medium text-primary">Automated Voice Setup</p>
-                        <p>We automatically create and link a Vapi AI assistant to your new number.</p>
+                        <p className="font-medium text-primary">Vapi Native Telephony</p>
+                        <p>Direct integration with Vapi's infrastructure for the lowest latency and highest reliability.</p>
                     </div>
                 </div>
                 <div className="flex gap-2 p-3 bg-primary/5 border border-primary/10 rounded-lg">
                     <Check className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                     <div>
-                        <p className="font-medium text-primary">Instant Messaging</p>
-                        <p>Your incoming SMS will be handled automatically, including appointment confirmations.</p>
+                        <p className="font-medium text-primary">Free US Numbers</p>
+                        <p>Take advantage of Vapi's free tier offering up to 10 US-based phone numbers.</p>
                     </div>
                 </div>
             </div>

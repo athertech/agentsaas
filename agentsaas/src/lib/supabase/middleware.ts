@@ -48,6 +48,7 @@ export async function updateSession(request: NextRequest) {
     if (
         !user &&
         !request.nextUrl.pathname.startsWith('/login') &&
+        !request.nextUrl.pathname.startsWith('/signup') &&
         !request.nextUrl.pathname.startsWith('/auth') &&
         !request.nextUrl.pathname.startsWith('/api') && // Allow webhooks
         request.nextUrl.pathname !== '/' // Allow landing page (if we make one)
@@ -58,13 +59,33 @@ export async function updateSession(request: NextRequest) {
         return NextResponse.redirect(url)
     }
 
-    // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're
-    // creating a new Response object with NextResponse.next() make sure to:
-    // 1. Pass the request in it, like so:
-    //    const myNewResponse = NextResponse.next({ request })
-    // 2. Copy over the cookies, like so:
-    //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-    // 3. Change the myNewResponse object to fit your needs, but avoid changing
-    //    the cookies!
+    // Onboarding redirection logic
+    const isDashboardPath = request.nextUrl.pathname.startsWith('/dashboard')
+    const isOnboardingPath = request.nextUrl.pathname.startsWith('/dashboard/onboarding')
+
+    if (user && isDashboardPath) {
+        const { data: practice } = await supabase
+            .from('practices')
+            .select('has_completed_onboarding')
+            .eq('owner_id', user.id)
+            .maybeSingle()
+
+        const hasCompleted = practice?.has_completed_onboarding
+
+        if (!hasCompleted && !isOnboardingPath) {
+            // Mandatory onboarding
+            const url = request.nextUrl.clone()
+            url.pathname = '/dashboard/onboarding'
+            return NextResponse.redirect(url)
+        }
+
+        if (hasCompleted && isOnboardingPath) {
+            // Already completed, don't allow access
+            const url = request.nextUrl.clone()
+            url.pathname = '/dashboard'
+            return NextResponse.redirect(url)
+        }
+    }
+
     return supabaseResponse
 }

@@ -113,7 +113,7 @@ export default async function IntegrationsPage() {
                 </CardHeader>
                 <CardContent className="text-sm text-muted-foreground space-y-2">
                     <p>
-                        • <strong>Phone & Voice:</strong> Twilio and Vapi are managed automatically by DentalAnswer AI. No setup required.
+                        • <strong>Phone & Voice:</strong> Vapi infrastructure is managed automatically by DentalAnswer AI. No setup required.
                     </p>
                     <p>
                         • <strong>Cal.com:</strong> Required for the AI to know when you're available and to book real appointments.

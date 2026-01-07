@@ -132,7 +132,7 @@ export default function Home() {
                       "Collects patient info & insurance",
                       "Checks live calendar availability",
                       "Books the appointment",
-                      "Sends SMS & email confirmation",
+                      "Sends automatic email confirmation",
                       "Transfers complex calls to staff"
                     ].map((item, i) => (
                       <li key={i} className="flex items-center gap-3">
@@ -315,7 +315,7 @@ export default function Home() {
                       "Unlimited AI phone lines",
                       "Up to 500 calls/month",
                       "Unlimited bookings",
-                      "Priority SMS/Email confirmations",
+                      "Priority Email confirmations",
                       "Full analytics dashboard",
                       "Custom greeting & voice"
                     ].map((feature, i) => (

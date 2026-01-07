@@ -1,20 +1,42 @@
 import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Calendar, Clock, Mail, Phone } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Calendar, Clock, User, Mail, Phone, Plus } from "lucide-react"
+import { NewAppointmentModal } from "@/components/dashboard/new-appointment-modal"
 
 export default async function AppointmentsPage() {
     const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // Fetch all bookings
+    if (!user) return null
+
+    // Get practice ID
+    const { data: practice } = await supabase
+        .from('practices')
+        .select('id')
+        .eq('owner_id', user.id)
+        .single()
+
+    if (!practice) return null
+
+    // Fetch all bookings for this practice with patient details
     const { data: bookings } = await supabase
         .from('bookings')
-        .select('*')
+        .select(`
+            *,
+            patients (
+                first_name,
+                last_name,
+                email,
+                phone
+            )
+        `)
+        .eq('practice_id', practice.id)
         .order('start_time', { ascending: true })
 
-    const upcomingBookings = bookings?.filter(b => new Date(b.start_time) > new Date()) || []
-    const pastBookings = bookings?.filter(b => new Date(b.start_time) <= new Date()) || []
+    const upcomingBookings = (bookings || []).filter((b: any) => new Date(b.start_time) > new Date())
+    const pastBookings = (bookings || []).filter((b: any) => new Date(b.start_time) <= new Date())
 
     const formatTime = (dateString: string) => {
         return new Date(dateString).toLocaleTimeString('en-US', {
@@ -51,10 +73,7 @@ export default async function AppointmentsPage() {
                         Manage patient appointments and bookings
                     </p>
                 </div>
-                <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    New Appointment
-                </Button>
+                <NewAppointmentModal />
             </div>
 
             {/* Stats Cards */}
@@ -84,7 +103,7 @@ export default async function AppointmentsPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">
-                            {upcomingBookings.filter(b => {
+                            {upcomingBookings.filter((b: any) => {
                                 const bookingDate = new Date(b.start_time)
                                 const weekFromNow = new Date()
                                 weekFromNow.setDate(weekFromNow.getDate() + 7)
@@ -106,7 +125,7 @@ export default async function AppointmentsPage() {
                 <CardContent>
                     {upcomingBookings.length > 0 ? (
                         <div className="space-y-3">
-                            {upcomingBookings.map((booking) => (
+                            {upcomingBookings.map((booking: any) => (
                                 <div
                                     key={booking.id}
                                     className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
@@ -118,23 +137,25 @@ export default async function AppointmentsPage() {
                                         <div className="flex-1">
                                             <div className="flex items-center gap-2">
                                                 <p className="font-medium">
-                                                    {booking.patient_name}
+                                                    {(booking.patients?.first_name
+                                                        ? `${booking.patients.first_name} ${booking.patients.last_name}`
+                                                        : booking.patient_name) || 'Unknown Patient'}
                                                 </p>
                                                 <Badge variant={getStatusColor(booking.status)}>
                                                     {booking.status || 'pending'}
                                                 </Badge>
                                             </div>
                                             <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
-                                                {booking.patient_email && (
+                                                {(booking.patients?.email || booking.patient_email) && (
                                                     <div className="flex items-center gap-1">
                                                         <Mail className="h-3 w-3" />
-                                                        {booking.patient_email}
+                                                        {booking.patients?.email || booking.patient_email}
                                                     </div>
                                                 )}
-                                                {booking.patient_phone && (
+                                                {(booking.patients?.phone || booking.patient_phone) && (
                                                     <div className="flex items-center gap-1">
                                                         <Phone className="h-3 w-3" />
-                                                        {booking.patient_phone}
+                                                        {booking.patients?.phone || booking.patient_phone}
                                                     </div>
                                                 )}
                                             </div>
@@ -178,7 +199,7 @@ export default async function AppointmentsPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-3">
-                            {pastBookings.slice(0, 5).map((booking) => (
+                            {pastBookings.slice(0, 5).map((booking: any) => (
                                 <div
                                     key={booking.id}
                                     className="flex items-center justify-between p-4 border rounded-lg opacity-75"
@@ -188,9 +209,13 @@ export default async function AppointmentsPage() {
                                             <Calendar className="h-5 w-5 text-muted-foreground" />
                                         </div>
                                         <div className="flex-1">
-                                            <p className="font-medium">{booking.patient_name}</p>
+                                            <p className="font-medium">
+                                                {booking.patients?.first_name
+                                                    ? `${booking.patients.first_name} ${booking.patients.last_name}`
+                                                    : booking.patient_name}
+                                            </p>
                                             <p className="text-sm text-muted-foreground">
-                                                {booking.patient_email}
+                                                {booking.patients?.email || booking.patient_email}
                                             </p>
                                         </div>
                                     </div>

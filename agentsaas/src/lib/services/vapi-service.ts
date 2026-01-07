@@ -10,15 +10,8 @@ function getVapiClient() {
     return new VapiClient({ token })
 }
 
-// Voice ID Mappings (using commercially available high-quality voices or Vapi defaults)
-const VOICE_MAP: Record<string, { provider: string, voiceId: string }> = {
-    'jennifer': { provider: '11labs', voiceId: '21m00Tcm4TlvDq8ikWAM' }, // Rachel (common standard)
-    'mark': { provider: '11labs', voiceId: 'TxGEqnHWrfWFTfGW9XjX' }, // Josh
-    'sarah': { provider: '11labs', voiceId: 'EXAVITQu4vr4xnSDxMaL' }, // Bella
-    'david': { provider: '11labs', voiceId: 'ErXwobaYiN019PkySvjV' }  // Antoni
-}
-
-const DEFAULT_VOICE = VOICE_MAP['jennifer']
+const DEFAULT_VOICE_ID = 'Tara' // Default Vapi voice for initialization
+const DEFAULT_PROVIDER = 'vapi'
 
 export async function getPracticeByPhone(phoneNumber: string) {
     const supabase = createAdminClient()
@@ -27,7 +20,10 @@ export async function getPracticeByPhone(phoneNumber: string) {
     // We assume DB stores E.164
     const { data, error } = await supabase
         .from('practices')
-        .select('*')
+        .select(`
+            *,
+            knowledge_base(*)
+        `)
         .or(`phone_number.eq.${phoneNumber},forwarding_number.eq.${phoneNumber}`) // strict match on either for now
         .maybeSingle()
 
@@ -72,24 +68,50 @@ export function generateSystemPrompt(practice: any) {
         prompt += `5. If the user mentions [${practice.emergency_keywords.join(', ')}], treat it as an emergency and advise them to call 911 if life-threatening, or transfer immediately.\n`
     }
 
+    // Knowledge Base Injection
+    if (practice.knowledge_base && practice.knowledge_base.length > 0) {
+        prompt += `\nINSTRUCTIONS & PRACTICE KNOWLEDGE:\n`
+        practice.knowledge_base.forEach((kb: any) => {
+            if (kb.question) {
+                prompt += `Q: ${kb.question}\nA: ${kb.content}\n\n`
+            } else {
+                prompt += `- ${kb.content}\n`
+            }
+        })
+    }
+
     prompt += `\nYour first message to the user is: "${greeting}"`
 
     return prompt
 }
 
+function getAppUrl() {
+    // API_URL should be the full URL in production, but we add fallbacks and protocol checks
+    let url = process.env.API_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+
+    // Ensure protocol
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        // Default to https for non-localhost, http for localhost
+        const protocol = url.includes('localhost') ? 'http://' : 'https://'
+        url = `${protocol}${url}`
+    }
+
+    // Remove trailing slash
+    return url.replace(/\/$/, '')
+}
+
 export function constructVapiConfig(practice: any) {
-    const voiceSetting = practice.ai_voice || 'jennifer'
-    const voice = VOICE_MAP[voiceSetting] || DEFAULT_VOICE
+    const voiceId = practice.ai_voice || DEFAULT_VOICE_ID
+    const provider = practice.ai_voice_provider || DEFAULT_PROVIDER
     const systemPrompt = generateSystemPrompt(practice)
+    const appUrl = getAppUrl()
 
     return {
         // assistant object expected by Vapi
         name: practice.name,
         voice: {
-            provider: voice.provider,
-            voiceId: voice.voiceId,
-            stability: 0.5,
-            similarityBoost: 0.75
+            provider: provider,
+            voiceId: voiceId
         } as any,
         model: {
             provider: "openai",
@@ -101,9 +123,6 @@ export function constructVapiConfig(practice: any) {
                 }
             ],
             tools: [
-                {
-                    type: "sms" as const  // Built-in SMS tool
-                },
                 {
                     type: "function" as const,
                     function: {
@@ -139,20 +158,24 @@ export function constructVapiConfig(practice: any) {
                 }
             ]
         } as any,
-        serverUrl: `${process.env.API_URL}/api/webhooks/vapi`,
+        serverUrl: `${appUrl}/api/webhooks/vapi`,
         serverUrlSecret: process.env.VAPI_WEBHOOK_SECRET || 'fallback_secret'
     }
 }
 
 // --- PHONE NUMBER AND CALL MANAGEMENT ---
 
-export async function searchAvailableNumbers(areaCode: string) {
+export async function listNumbers() {
     try {
         const vapi = getVapiClient()
+        // Vapi doesn't have a direct "search" in the SDK for available numbers to buy like Twilio does.
+        // Usually you just request one via .create().
+        // However, we can list EXISTING numbers to see what's available if we already own some,
+        // or we can just provide a "buy" button for the area code.
         const numbers = await vapi.phoneNumbers.list()
         return numbers
     } catch (error) {
-        console.error("Error searching numbers:", error)
+        console.error("Error listing numbers:", error)
         throw error
     }
 }
@@ -193,7 +216,10 @@ export async function createAssistantForPractice(practiceId: string) {
     }
 }
 
-export async function provisionPhoneNumber(areaCode: string, practiceId: string) {
+/**
+ * Provision a phone number directly from Vapi or link an existing unassigned one.
+ */
+export async function provisionPhoneNumber(areaCode: string, practiceId: string, vapiPhoneNumberId?: string | null) {
     const supabase = createAdminClient()
     const vapi = getVapiClient()
 
@@ -217,11 +243,23 @@ export async function provisionPhoneNumber(areaCode: string, practiceId: string)
 
         console.log(`[Provisioning] Step 2: Assistant created: ${assistantId}`)
 
-        // 3. Buy phone number from Vapi (This part might still fail if Vapi doesn't allow programmatic purchase)
-        console.log('[Provisioning] Step 3: Provisioning phone number...')
-        const vapiNumber = await (vapi.phoneNumbers as any).create({
-            assistantId: assistantId
-        })
+        // 3. Buy phone number from Vapi (utilizing free tier if available) or use existing
+        let vapiNumber: any
+
+        if (vapiPhoneNumberId) {
+            console.log(`[Provisioning] Step 3: Linking existing Vapi number ${vapiPhoneNumberId}...`)
+            vapiNumber = await (vapi.phoneNumbers as any).update(vapiPhoneNumberId, {
+                assistantId: assistantId,
+                name: `${practice.name} Main Line`
+            })
+        } else {
+            console.log(`[Provisioning] Step 3: Provisioning NEW phone number...`)
+            vapiNumber = await (vapi.phoneNumbers as any).create({
+                provider: 'vapi',
+                name: `${practice.name} Main Line`,
+                assistantId: assistantId
+            })
+        }
 
         const phoneNumberId = (vapiNumber as any).id
         const phoneNumber = (vapiNumber as any).number
@@ -232,8 +270,8 @@ export async function provisionPhoneNumber(areaCode: string, practiceId: string)
         console.log('[Provisioning] Step 4: Saving to database...')
         const { data: dbNumber, error } = await supabase.from('phone_numbers').insert({
             practice_id: practiceId,
-            phone_number: phoneNumber || `+1${areaCode}MOCK${Date.now()}`,
-            vapi_phone_number_id: phoneNumberId || `mock_${Date.now()}`,
+            phone_number: phoneNumber || `+1${areaCode}PENDING`,
+            vapi_phone_number_id: phoneNumberId,
             vapi_assistant_id: assistantId,
             is_primary: true,
             status: 'active'
@@ -247,54 +285,6 @@ export async function provisionPhoneNumber(areaCode: string, practiceId: string)
     } catch (error) {
         console.error("[Provisioning] ❌ Failed:", error)
         throw error
-    }
-}
-
-export async function sendSms(to: string, message: string, practiceId: string) {
-    const supabase = createAdminClient()
-
-    try {
-        // 1. Find the primary phone number for the practice
-        const { data: phoneNumber } = await supabase
-            .from('phone_numbers')
-            .select('*')
-            .eq('practice_id', practiceId)
-            .eq('is_primary', true)
-            .single()
-
-        if (!phoneNumber || !phoneNumber.vapi_phone_number_id) {
-            console.error("No primary Vapi number found for practice", practiceId)
-            return false
-        }
-
-        // 2. Send via Vapi
-        // NOTE: The Vapi SDK does NOT have a direct sendMessage/sendSms method
-        // SMS is handled through the assistant's SMS tool during conversations
-        // For programmatic SMS, we would need to:
-        // - Make an outbound call with the assistant
-        // - Have the assistant use its SMS tool
-        // OR use Vapi's REST API directly (not via SDK)
-
-        console.log(`[Vapi SMS] Would send to ${to} from ${phoneNumber.phone_number}: "${message}"`)
-        console.log(`[Vapi SMS] SDK limitation: No direct SMS method available. SMS sent via assistant tool during calls.`)
-
-        // 3. Log to database as "pending" since we can't actually send it programmatically
-        await supabase.from('messages').insert({
-            practice_id: practiceId,
-            patient_id: null,
-            message_type: 'sms',
-            direction: 'outbound',
-            from_address: phoneNumber.phone_number,
-            to_address: to,
-            body: message,
-            status: 'pending',  // Mark as pending since SDK can't send directly
-            provider: 'vapi'
-        })
-
-        return true
-    } catch (error) {
-        console.error("Failed to send SMS:", error)
-        return false
     }
 }
 
@@ -320,35 +310,6 @@ export async function makeOutboundCall(
         return call
     } catch (error) {
         console.error("Failed to make outbound call:", error)
-        throw error
-    }
-}
-
-/**
- * Import a Twilio phone number into Vapi
- */
-export async function importTwilioNumberToVapi(
-    twilioPhoneNumber: string,
-    twilioAccountSid: string,
-    twilioAuthToken: string
-) {
-    const vapi = getVapiClient()
-
-    try {
-        const vapiPhone = await vapi.phoneNumbers.create({
-            provider: 'twilio',
-            twilioAccountSid: twilioAccountSid,
-            twilioAuthToken: twilioAuthToken,
-            twilioPhoneNumber: twilioPhoneNumber
-        } as any)
-
-        return {
-            id: (vapiPhone as any).id,
-            number: (vapiPhone as any).number,
-            voiceUrl: (vapiPhone as any).voiceUrl
-        }
-    } catch (error) {
-        console.error('[Vapi] Failed to import Twilio number:', error)
         throw error
     }
 }

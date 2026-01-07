@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Phone, Plus, Settings, CheckCircle, AlertCircle } from "lucide-react"
-import { getPhoneNumbers } from "@/lib/actions/phone-numbers"
+import { getPracticePhoneNumbers } from "@/lib/actions/phone-numbers"
 import { PhoneNumberProvisioner } from "@/components/phone-number-provisioner"
 import { TestCallButton } from "@/components/test-call-button"
 import { redirect } from "next/navigation"
@@ -33,7 +33,7 @@ export default async function PhoneSettingsPage({
     }
 
     // Get phone numbers from our new action
-    const phoneNumbers = await getPhoneNumbers()
+    const phoneNumbers = await getPracticePhoneNumbers()
 
     return (
         <div className="space-y-6">
@@ -110,7 +110,7 @@ export default async function PhoneSettingsPage({
                                 </div>
                             </CardHeader>
                             <CardContent className="space-y-6">
-                                <div className="grid gap-6 md:grid-cols-3">
+                                <div className="grid gap-6 md:grid-cols-2">
                                     <div className="space-y-1">
                                         <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                                             Vapi Assistant
@@ -121,19 +121,11 @@ export default async function PhoneSettingsPage({
                                     </div>
                                     <div className="space-y-1">
                                         <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                                            Twilio SID
-                                        </p>
-                                        <p className="text-sm font-mono truncate bg-muted/50 p-1.5 rounded border">
-                                            {phone.twilio_sid || 'Imported'}
-                                        </p>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                                             Capabilities
                                         </p>
                                         <div className="flex gap-1">
                                             <Badge variant="outline" className="text-[10px]">VOICE</Badge>
-                                            <Badge variant="outline" className="text-[10px]">SMS</Badge>
+                                            <Badge variant="outline" className="text-[10px] bg-muted text-muted-foreground">AI RECEPTIONIST</Badge>
                                         </div>
                                     </div>
                                 </div>

@@ -2,8 +2,11 @@ import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { PhoneCall, Clock, Calendar, Download } from "lucide-react"
-import { CallsList } from "@/components/dashboard/calls-list"
-import { SeedButton } from "@/components/dashboard/seed-button"
+import dynamic from "next/dynamic"
+
+const CallsList = dynamic(() => import("@/components/dashboard/calls-list").then(mod => mod.CallsList), {
+    loading: () => <div className="h-64 w-full animate-pulse bg-muted rounded-lg" />
+})
 
 export default async function CallsPage() {
     const supabase = await createClient()
@@ -33,7 +36,6 @@ export default async function CallsPage() {
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <SeedButton />
                     <Button variant="outline" className="h-10">
                         <Download className="mr-2 h-4 w-4" />
                         Export Logs
@@ -59,7 +61,7 @@ export default async function CallsPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">
-                            {calls?.filter(c => c.status === 'completed').length || 0}
+                            {calls?.filter((c: any) => c.status === 'completed').length || 0}
                         </div>
                     </CardContent>
                 </Card>
@@ -71,7 +73,7 @@ export default async function CallsPage() {
                     <CardContent>
                         <div className="text-2xl font-bold">
                             {calls?.length ? formatDuration(
-                                Math.round(calls.reduce((acc, c) => acc + (c.duration_seconds || 0), 0) / calls.length)
+                                Math.round(calls.reduce((acc: number, c: any) => acc + (c.duration_seconds || 0), 0) / calls.length)
                             ) : '0:00'}
                         </div>
                     </CardContent>
@@ -83,7 +85,7 @@ export default async function CallsPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">
-                            {calls?.filter(c => {
+                            {calls?.filter((c: any) => {
                                 const callDate = new Date(c.started_at)
                                 const today = new Date()
                                 return callDate.toDateString() === today.toDateString()

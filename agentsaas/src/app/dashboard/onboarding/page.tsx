@@ -3,8 +3,7 @@
 import * as React from 'react'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { completeOnboarding } from '@/lib/actions/onboarding'
-import { OnboardingData, OfficeHours } from '@/lib/types/onboarding'
+import { OnboardingData, OfficeHours, KBEntry } from '@/lib/types/onboarding'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,8 +11,21 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { StepIndicator } from "@/components/onboarding/step-indicator"
-import { ArrowRight, ArrowLeft, Sparkles, Play, Calendar, CheckCircle2, Phone, Search, Loader2 } from "lucide-react"
-import { searchNumbers } from '@/lib/actions/phone-numbers'
+import { ArrowRight, ArrowLeft, Sparkles, Play, Calendar, CheckCircle2, Phone, Search, Loader2, Volume2 } from "lucide-react"
+import { searchNumbers, performProvisioning } from '@/lib/actions/phone-numbers'
+import { makeTestCall } from '@/lib/actions/test-call'
+import { getAvailableVoices } from '@/lib/actions/voices'
+import { completeOnboarding, savePracticeDraft } from '@/lib/actions/onboarding'
+import { Toaster, toast } from 'sonner'
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog"
 
 const STEPS = [
     "Welcome",
@@ -22,6 +34,7 @@ const STEPS = [
     "Calendar Connection",
     "Appointment Types",
     "Phone Number",
+    "Knowledge Base",
     "AI Customization"
 ]
 
@@ -43,6 +56,22 @@ export default function OnboardingPage() {
         // Phone
         phoneNumber: '',
 
+        // Knowledge Base
+        knowledgeBase: [
+            { category: 'faq', question: 'What are your most common procedures?', content: '' },
+            { category: 'insurance', question: 'Which insurance plans do you accept?', content: '' },
+            { category: 'emergency', question: 'How do you handle dental emergencies?', content: '' }
+        ],
+
+        // Appointment Types
+        appointmentTypes: [
+            { name: 'New Patient Exam', duration: 60, active: true },
+            { name: 'Cleaning & Exam', duration: 60, active: true },
+            { name: 'Emergency Visit', duration: 30, active: true },
+            { name: 'Consultation', duration: 30, active: true },
+            { name: 'Cosmetic Consult', duration: 45, active: true },
+        ],
+
         // AI
         voiceId: 'jennifer',
         greeting: '',
@@ -55,12 +84,17 @@ export default function OnboardingPage() {
         } else {
             // Complete onboarding
             setIsSaving(true)
+            toast.loading("Saving your practice settings...", { id: 'onboarding-save' })
             try {
                 await completeOnboarding(formData)
-                router.push('/dashboard?onboarding=complete')
-            } catch (error) {
+                toast.success("Setup complete! Redirecting to dashboard...", { id: 'onboarding-save' })
+                // Give a small delay for the toast to be seen
+                setTimeout(() => {
+                    router.push('/dashboard?onboarding=complete')
+                }, 1500)
+            } catch (error: any) {
                 console.error("Failed to save onboarding data:", error)
-                // You might want to show a toast here
+                toast.error(`Failed to save settings: ${error.message || 'Unknown error'}`, { id: 'onboarding-save' })
             } finally {
                 setIsSaving(false)
             }
@@ -84,10 +118,12 @@ export default function OnboardingPage() {
             case 3:
                 return <CalendarStep formData={formData} setFormData={setFormData} onNext={handleNext} onBack={handleBack} />
             case 4:
-                return <AppointmentTypesStep onNext={handleNext} onBack={handleBack} />
+                return <AppointmentTypesStep formData={formData} setFormData={setFormData} onNext={handleNext} onBack={handleBack} />
             case 5:
                 return <PhoneNumberStep formData={formData} setFormData={setFormData} onNext={handleNext} onBack={handleBack} />
             case 6:
+                return <KnowledgeBaseStep formData={formData} setFormData={setFormData} onNext={handleNext} onBack={handleBack} />
+            case 7:
                 return <AICustomizationStep formData={formData} setFormData={setFormData} onNext={handleNext} onBack={handleBack} isSaving={isSaving} />
             default:
                 return null
@@ -96,6 +132,7 @@ export default function OnboardingPage() {
 
     return (
         <div className="min-h-screen bg-secondary/30 py-8">
+            <Toaster position="top-center" richColors />
             <div className="container max-w-5xl mx-auto px-4">
                 <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
                     {/* Sidebar with progress */}
@@ -269,6 +306,46 @@ function PracticeInfoStep({ formData, setFormData, onNext, onBack }: StepProps) 
                             </label>
                         ))}
                     </div>
+                    {/* Custom practice type input */}
+                    <div className="flex gap-2 mt-2">
+                        <Input
+                            placeholder="Other service (e.g. Dental Jewelry)"
+                            id="customPracticeType"
+                            className="text-sm h-8"
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    const val = (e.target as HTMLInputElement).value.trim();
+                                    if (val && !formData.practiceType.includes(val)) {
+                                        setFormData({ ...formData, practiceType: [...formData.practiceType, val] });
+                                        (e.target as HTMLInputElement).value = '';
+                                    }
+                                }
+                            }}
+                        />
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 px-2"
+                            onClick={() => {
+                                const input = document.getElementById('customPracticeType') as HTMLInputElement;
+                                const val = input.value.trim();
+                                if (val && !formData.practiceType.includes(val)) {
+                                    setFormData({ ...formData, practiceType: [...formData.practiceType, val] });
+                                    input.value = '';
+                                }
+                            }}
+                        >
+                            Add
+                        </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                        {formData.practiceType.filter(t => !['General Dentistry', 'Cosmetic Dentistry', 'Orthodontics', 'Pediatric', 'Oral Surgery', 'Endodontics'].includes(t)).map(custom => (
+                            <Badge key={custom} variant="secondary" className="flex items-center gap-1">
+                                {custom}
+                                <button className="hover:text-destructive" onClick={() => setFormData({ ...formData, practiceType: formData.practiceType.filter(t => t !== custom) })}>×</button>
+                            </Badge>
+                        ))}
+                    </div>
                 </div>
 
                 <div className="flex gap-3">
@@ -301,7 +378,13 @@ function OfficeHoursStep({ formData, setFormData, onNext, onBack }: StepProps) {
                     breaks: []
                 }
             })
-            setFormData({ ...formData, officeHours: defaultHours })
+            // Default after hours if not set
+            const initialData = {
+                ...formData,
+                officeHours: defaultHours,
+                afterHoursBehavior: formData.afterHoursBehavior || 'book_next'
+            }
+            setFormData(initialData)
         }
     }
 
@@ -309,17 +392,33 @@ function OfficeHoursStep({ formData, setFormData, onNext, onBack }: StepProps) {
         initializeHours()
     }, [])
 
-    const updateDay = (day: string, field: keyof OfficeHours, value: string | boolean) => {
-        setFormData({
-            ...formData,
+    const updateDay = (day: string, field: keyof OfficeHours, value: any) => {
+        setFormData(prev => ({
+            ...prev,
             officeHours: {
-                ...formData.officeHours,
+                ...prev.officeHours,
                 [day]: {
-                    ...formData.officeHours[day],
+                    ...prev.officeHours[day],
                     [field]: value
                 }
             }
-        })
+        }))
+    }
+
+    const addBreak = (day: string) => {
+        const currentBreaks = formData.officeHours[day]?.breaks || []
+        updateDay(day, 'breaks', [...currentBreaks, { start: '12:00', end: '13:00' }])
+    }
+
+    const removeBreak = (day: string, index: number) => {
+        const currentBreaks = formData.officeHours[day]?.breaks || []
+        updateDay(day, 'breaks', currentBreaks.filter((_, i) => i !== index))
+    }
+
+    const updateBreak = (day: string, index: number, field: 'start' | 'end', value: string) => {
+        const currentBreaks = [...(formData.officeHours[day]?.breaks || [])]
+        currentBreaks[index] = { ...currentBreaks[index], [field]: value }
+        updateDay(day, 'breaks', currentBreaks)
     }
 
     return (
@@ -328,54 +427,154 @@ function OfficeHoursStep({ formData, setFormData, onNext, onBack }: StepProps) {
                 <CardTitle>Office Hours</CardTitle>
                 <CardDescription>When is your office open?</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-6">
                 <div className="space-y-3">
                     {days.map((day) => {
-                        const hours = formData.officeHours[day] || { isOpen: false, open: '09:00', close: '17:00' }
+                        const hours = formData.officeHours[day] || { isOpen: false, open: '09:00', close: '17:00', breaks: [] }
                         return (
-                            <div key={day} className="flex items-center gap-3 p-3 border rounded-lg">
-                                <div className="w-28">
-                                    <span className="font-medium">{day}</span>
-                                </div>
-                                <div className="flex items-center gap-2 flex-1">
-                                    <input
-                                        type="checkbox"
-                                        checked={hours.isOpen}
-                                        onChange={(e) => updateDay(day, 'isOpen', e.target.checked)}
-                                        className="rounded"
-                                    />
-                                    {hours.isOpen ? (
-                                        <>
-                                            <Input
-                                                type="time"
-                                                value={hours.open}
-                                                onChange={(e) => updateDay(day, 'open', e.target.value)}
-                                                className="w-32"
-                                            />
-                                            <span className="text-muted-foreground">to</span>
-                                            <Input
-                                                type="time"
-                                                value={hours.close}
-                                                onChange={(e) => updateDay(day, 'close', e.target.value)}
-                                                className="w-32"
-                                            />
-                                        </>
-                                    ) : (
-                                        <span className="text-muted-foreground">Closed</span>
-                                    )}
+                            <div key={day} className={`p-3 border rounded-lg transition-colors ${hours.isOpen ? 'bg-card' : 'bg-muted/30'}`}>
+                                <div className="flex items-center gap-3">
+                                    <div className="w-28 flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={hours.isOpen}
+                                            onChange={(e) => updateDay(day, 'isOpen', e.target.checked)}
+                                            className="rounded border-gray-300 text-primary focus:ring-primary"
+                                        />
+                                        <span className={`font-medium ${!hours.isOpen && 'text-muted-foreground'}`}>{day}</span>
+                                    </div>
+
+                                    <div className="flex-1">
+                                        {hours.isOpen ? (
+                                            <div className="space-y-2">
+                                                <div className="flex items-center gap-2">
+                                                    <Input
+                                                        type="time"
+                                                        value={hours.open}
+                                                        onChange={(e) => updateDay(day, 'open', e.target.value)}
+                                                        className="w-32 h-9"
+                                                    />
+                                                    <span className="text-muted-foreground text-sm">to</span>
+                                                    <Input
+                                                        type="time"
+                                                        value={hours.close}
+                                                        onChange={(e) => updateDay(day, 'close', e.target.value)}
+                                                        className="w-32 h-9"
+                                                    />
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => addBreak(day)}
+                                                        className="ml-2 h-8 text-xs"
+                                                    >
+                                                        + Add Break
+                                                    </Button>
+                                                </div>
+
+                                                {/* Breaks */}
+                                                {hours.breaks && hours.breaks.length > 0 && (
+                                                    <div className="space-y-2 pl-2 border-l-2 border-muted ml-1">
+                                                        {hours.breaks.map((brk, idx) => (
+                                                            <div key={idx} className="flex items-center gap-2">
+                                                                <span className="text-xs text-muted-foreground w-12">Break:</span>
+                                                                <Input
+                                                                    type="time"
+                                                                    value={brk.start}
+                                                                    onChange={(e) => updateBreak(day, idx, 'start', e.target.value)}
+                                                                    className="w-28 h-8 text-xs"
+                                                                />
+                                                                <span className="text-muted-foreground text-xs">to</span>
+                                                                <Input
+                                                                    type="time"
+                                                                    value={brk.end}
+                                                                    onChange={(e) => updateBreak(day, idx, 'end', e.target.value)}
+                                                                    className="w-28 h-8 text-xs"
+                                                                />
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                                    onClick={() => removeBreak(day, idx)}
+                                                                >
+                                                                    ×
+                                                                </Button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <span className="text-muted-foreground text-sm italic">Closed</span>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         )
                     })}
                 </div>
 
-                <div className="bg-muted/50 p-4 rounded-lg">
-                    <p className="text-sm text-muted-foreground">
-                        💡 Your AI receptionist will inform callers of your office hours and handle after-hours calls according to your preferences.
-                    </p>
+                <Separator />
+
+                <div className="space-y-4">
+                    <h3 className="text-lg font-medium">After-Hours Behavior</h3>
+                    <div className="grid gap-3">
+                        <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-all ${formData.afterHoursBehavior === 'book_next' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'}`}>
+                            <input
+                                type="radio"
+                                name="afterHours"
+                                value="book_next"
+                                checked={formData.afterHoursBehavior === 'book_next'}
+                                onChange={() => setFormData({ ...formData, afterHoursBehavior: 'book_next' })}
+                                className="mt-1"
+                            />
+                            <div>
+                                <span className="font-medium block">Book appointments for next available day</span>
+                                <span className="text-sm text-muted-foreground">The AI will offer the earliest available slots from your calendar.</span>
+                            </div>
+                        </label>
+
+                        <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-all ${formData.afterHoursBehavior === 'voicemail' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'}`}>
+                            <input
+                                type="radio"
+                                name="afterHours"
+                                value="voicemail"
+                                checked={formData.afterHoursBehavior === 'voicemail'}
+                                onChange={() => setFormData({ ...formData, afterHoursBehavior: 'voicemail' })}
+                                className="mt-1"
+                            />
+                            <div>
+                                <span className="font-medium block">Take messages only</span>
+                                <span className="text-sm text-muted-foreground">The AI will take a message and send you a notification.</span>
+                            </div>
+                        </label>
+
+                        <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-all ${formData.afterHoursBehavior === 'transfer' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'}`}>
+                            <input
+                                type="radio"
+                                name="afterHours"
+                                value="transfer"
+                                checked={formData.afterHoursBehavior === 'transfer'}
+                                onChange={() => setFormData({ ...formData, afterHoursBehavior: 'transfer' })}
+                                className="mt-1"
+                            />
+                            <div className="flex-1">
+                                <span className="font-medium block">Transfer to emergency line</span>
+                                <span className="text-sm text-muted-foreground mb-2 block">Redirect calls to an on-call doctor or service.</span>
+
+                                {formData.afterHoursBehavior === 'transfer' && (
+                                    <Input
+                                        placeholder="Enter emergency phone number (e.g. +1...)"
+                                        value={formData.emergencyPhoneNumber || ''}
+                                        onChange={(e) => setFormData({ ...formData, emergencyPhoneNumber: e.target.value })}
+                                        className="max-w-xs mt-2"
+                                    />
+                                )}
+                            </div>
+                        </label>
+                    </div>
                 </div>
 
-                <div className="flex gap-3">
+                <div className="flex gap-3 pt-4">
                     <Button onClick={onBack} variant="outline" className="flex-1">
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Back
@@ -453,14 +652,34 @@ function CalendarStep({ formData, setFormData, onNext, onBack }: StepProps) {
 }
 
 // Step 5: Appointment Types
-function AppointmentTypesStep({ onNext, onBack }: { onNext: () => void, onBack: () => void }) {
-    const [appointmentTypes, setAppointmentTypes] = React.useState([
-        { name: 'New Patient Exam', duration: 60, active: true },
-        { name: 'Cleaning & Exam', duration: 60, active: true },
-        { name: 'Emergency Visit', duration: 30, active: true },
-        { name: 'Consultation', duration: 30, active: true },
-        { name: 'Cosmetic Consult', duration: 45, active: true },
-    ])
+function AppointmentTypesStep({ formData, setFormData, onNext, onBack }: StepProps) {
+    const [showAddCustom, setShowAddCustom] = React.useState(false)
+    const [customName, setCustomName] = React.useState('')
+    const [customDuration, setCustomDuration] = React.useState('30')
+
+    const appointmentTypes = formData.appointmentTypes || []
+
+    const toggleActive = (index: number) => {
+        const updated = [...appointmentTypes]
+        updated[index].active = !updated[index].active
+        setFormData({ ...formData, appointmentTypes: updated })
+    }
+
+    const addCustomType = () => {
+        if (!customName.trim()) return
+        const newType = {
+            name: customName.trim(),
+            duration: parseInt(customDuration) || 30,
+            active: true
+        }
+        setFormData({
+            ...formData,
+            appointmentTypes: [...appointmentTypes, newType]
+        })
+        setCustomName('')
+        setShowAddCustom(false)
+        toast.success(`Added ${newType.name}`)
+    }
 
     return (
         <Card>
@@ -471,17 +690,13 @@ function AppointmentTypesStep({ onNext, onBack }: { onNext: () => void, onBack: 
             <CardContent className="space-y-6">
                 <div className="space-y-3">
                     {appointmentTypes.map((apt, index) => (
-                        <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div key={index} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors">
                             <div className="flex items-center gap-3 flex-1">
                                 <input
                                     type="checkbox"
                                     checked={apt.active}
-                                    onChange={(e) => {
-                                        const updated = [...appointmentTypes]
-                                        updated[index].active = e.target.checked
-                                        setAppointmentTypes(updated)
-                                    }}
-                                    className="rounded"
+                                    onChange={() => toggleActive(index)}
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                                 />
                                 <div className="flex-1">
                                     <p className="font-medium">{apt.name}</p>
@@ -492,9 +707,36 @@ function AppointmentTypesStep({ onNext, onBack }: { onNext: () => void, onBack: 
                     ))}
                 </div>
 
-                <Button variant="outline" className="w-full">
-                    + Add Custom Appointment Type
-                </Button>
+                {!showAddCustom ? (
+                    <Button variant="outline" className="w-full border-dashed" onClick={() => setShowAddCustom(true)}>
+                        + Add Custom Appointment Type
+                    </Button>
+                ) : (
+                    <div className="p-4 border rounded-lg bg-muted/30 space-y-4">
+                        <div className="grid gap-2">
+                            <Label htmlFor="custom-name">Appointment Name</Label>
+                            <Input
+                                id="custom-name"
+                                placeholder="e.g. Teeth Whitening"
+                                value={customName}
+                                onChange={(e) => setCustomName(e.target.value)}
+                            />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="custom-duration">Duration (minutes)</Label>
+                            <Input
+                                id="custom-duration"
+                                type="number"
+                                value={customDuration}
+                                onChange={(e) => setCustomDuration(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <Button variant="outline" className="flex-1" onClick={() => setShowAddCustom(false)}>Cancel</Button>
+                            <Button className="flex-1" onClick={addCustomType}>Add Type</Button>
+                        </div>
+                    </div>
+                )}
 
                 <div className="bg-muted/50 p-4 rounded-lg">
                     <p className="text-sm text-muted-foreground">
@@ -507,7 +749,7 @@ function AppointmentTypesStep({ onNext, onBack }: { onNext: () => void, onBack: 
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Back
                     </Button>
-                    <Button onClick={onNext} className="flex-1">
+                    <Button onClick={onNext} className="flex-1" disabled={!appointmentTypes.some(a => a.active)}>
                         Continue
                         <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
@@ -622,11 +864,31 @@ function PhoneNumberStep({ formData, setFormData, onNext, onBack }: StepProps) {
                 </div>
 
                 <div className="flex gap-3">
-                    <Button onClick={onBack} variant="outline" className="flex-1">
+                    <Button onClick={onBack} variant="outline" className="flex-1" disabled={isSearching}>
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Back
                     </Button>
-                    <Button onClick={onNext} className="flex-1" disabled={!selectedNumber}>
+                    <Button
+                        onClick={async () => {
+                            if (!selectedNumber) return
+                            const tid = toast.loading("Provisioning your number...")
+                            try {
+                                const practiceId = await savePracticeDraft(formData)
+                                const result = await performProvisioning(practiceId, selectedNumber, formData.practiceName)
+                                if (result.success) {
+                                    toast.success("Number linked successfully!", { id: tid })
+                                    onNext()
+                                } else {
+                                    toast.error("Provisioning failed. Please try another number.", { id: tid })
+                                }
+                            } catch (error: any) {
+                                console.error("Provisioning error:", error)
+                                toast.error(`Error: ${error.message || 'Failed to provision'}`, { id: tid })
+                            }
+                        }}
+                        className="flex-1"
+                        disabled={!selectedNumber || isSearching}
+                    >
                         Continue
                         <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
@@ -636,18 +898,208 @@ function PhoneNumberStep({ formData, setFormData, onNext, onBack }: StepProps) {
     )
 }
 
-// Step 7: AI Customization
+// Step 7: Knowledge Base
+function KnowledgeBaseStep({ formData, setFormData, onNext, onBack }: StepProps) {
+    const addEntry = () => {
+        const newKB = [...(formData.knowledgeBase || []), { category: 'faq', question: '', content: '' }]
+        setFormData({ ...formData, knowledgeBase: newKB })
+    }
+
+    const updateEntry = (index: number, field: keyof KBEntry, value: string) => {
+        const newKB = [...(formData.knowledgeBase || [])]
+        newKB[index] = { ...newKB[index], [field]: value }
+        setFormData({ ...formData, knowledgeBase: newKB })
+    }
+
+    const removeEntry = (index: number) => {
+        const newKB = (formData.knowledgeBase || []).filter((_, i) => i !== index)
+        setFormData({ ...formData, knowledgeBase: newKB })
+    }
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>AI Knowledge Base</CardTitle>
+                <CardDescription>
+                    Provide the AI with specific information about your practice to help it answer patient questions accurately.
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+                <div className="space-y-4">
+                    {formData.knowledgeBase?.map((entry, index) => (
+                        <div key={index} className="p-4 border rounded-lg space-y-3 relative group">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => removeEntry(index)}
+                            >
+                                <Separator className="w-4 h-0.5 bg-destructive" />
+                            </Button>
+
+                            <div className="grid gap-3">
+                                <div className="grid gap-1.5">
+                                    <Label>Category</Label>
+                                    <select
+                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        value={entry.category}
+                                        onChange={(e) => updateEntry(index, 'category', e.target.value)}
+                                    >
+                                        <option value="faq">FAQ</option>
+                                        <option value="insurance">Insurance</option>
+                                        <option value="procedures">Procedures</option>
+                                        <option value="emergency">Emergency Policy</option>
+                                        <option value="general">General Info</option>
+                                    </select>
+                                </div>
+
+                                <div className="grid gap-1.5">
+                                    <Label>Topic / Question</Label>
+                                    <Input
+                                        value={entry.question}
+                                        onChange={(e) => updateEntry(index, 'question', e.target.value)}
+                                        placeholder="e.g. Do you accept Delta Dental?"
+                                    />
+                                </div>
+
+                                <div className="grid gap-1.5">
+                                    <Label>Answer / Content</Label>
+                                    <textarea
+                                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        value={entry.content}
+                                        onChange={(e) => updateEntry(index, 'content', e.target.value)}
+                                        placeholder="Provide a detailed answer for the AI..."
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                <Button variant="outline" className="w-full border-dashed" onClick={addEntry}>
+                    + Add More Information
+                </Button>
+
+                <div className="bg-primary/5 p-4 rounded-lg flex gap-3 items-start">
+                    <Sparkles className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <p className="text-sm text-primary/80">
+                        The more information you provide, the better your AI receptionist will be at helping your patients.
+                    </p>
+                </div>
+
+                <div className="flex gap-3">
+                    <Button onClick={onBack} variant="outline" className="flex-1">
+                        <ArrowLeft className="mr-2 h-4 w-4" />
+                        Back
+                    </Button>
+                    <Button onClick={onNext} className="flex-1">
+                        Continue
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                </div>
+            </CardContent>
+        </Card>
+    )
+}
+
+// Step 8: AI Customization
 interface AICustomizationProps extends StepProps {
     isSaving: boolean
 }
 
 function AICustomizationStep({ formData, setFormData, onNext, onBack, isSaving }: AICustomizationProps) {
-    const voices = [
-        { id: 'sarah', name: 'Sarah', description: 'Warm & Professional' },
-        { id: 'emma', name: 'Emma', description: 'Friendly & Energetic' },
-        { id: 'jessica', name: 'Jessica', description: 'Calm & Reassuring' },
-        { id: 'michael', name: 'Michael', description: 'Professional Male' },
-    ]
+    const [isPlaying, setIsPlaying] = React.useState<string | null>(null)
+    const [isCalling, setIsCalling] = React.useState(false)
+    const [testPhoneNumber, setTestPhoneNumber] = React.useState('')
+    const [isDialogOpen, setIsDialogOpen] = React.useState(false)
+    const [voices, setVoices] = React.useState<any[]>([])
+    const [isLoadingVoices, setIsLoadingVoices] = React.useState(true)
+    const audioRef = React.useRef<HTMLAudioElement | null>(null)
+
+    React.useEffect(() => {
+        async function fetchVoices() {
+            setIsLoadingVoices(true)
+            const result = await getAvailableVoices()
+            if (result.success && result.voices) {
+                // Filter for common high-quality providers if list is too long, 
+                // or just take the first few popular ones
+                const popularVoices = result.voices.filter((v: any) =>
+                    v.provider === 'elevenlabs' || v.provider === 'playht' || v.provider === 'vapi'
+                ).slice(0, 10)
+                setVoices(popularVoices)
+
+                // Set default voice if none selected
+                if (!formData.voiceId && popularVoices.length > 0) {
+                    setFormData(prev => ({
+                        ...prev,
+                        voiceId: popularVoices[0].id,
+                        voiceProvider: popularVoices[0].provider
+                    }))
+                }
+            } else {
+                toast.error("Failed to load voices from Vapi")
+            }
+            setIsLoadingVoices(false)
+        }
+        fetchVoices()
+    }, [])
+
+    const playVoicePreview = (voiceId: string, previewUrl: string) => {
+        if (isPlaying === voiceId) {
+            audioRef.current?.pause()
+            setIsPlaying(null)
+            return
+        }
+
+        if (audioRef.current) {
+            audioRef.current.pause()
+        }
+
+        if (!previewUrl) {
+            toast.error("No preview available for this voice")
+            return
+        }
+
+        const audio = new Audio(previewUrl)
+        audioRef.current = audio
+        setIsPlaying(voiceId)
+        audio.play().catch(err => {
+            console.error("Audio playback error:", err)
+            toast.error("Could not play preview. Vapi might be processing it.")
+            setIsPlaying(null)
+        })
+        audio.onended = () => setIsPlaying(null)
+    }
+
+    const handleTestCall = async () => {
+        if (!formData.phoneNumber) {
+            toast.error("Please select a phone number first")
+            return
+        }
+
+        if (!testPhoneNumber) {
+            toast.error("Please enter a phone number")
+            return
+        }
+
+        setIsCalling(true)
+        toast.info("Initiating test call...")
+
+        try {
+            const result = await makeTestCall(testPhoneNumber)
+            if (result.success) {
+                toast.success("Test call initiated! You should receive a call shortly.")
+                setIsDialogOpen(false)
+            } else {
+                toast.error(result.error || "Failed to initiate test call")
+            }
+        } catch (error) {
+            console.error("Test call error:", error)
+            toast.error("An unexpected error occurred")
+        } finally {
+            setIsCalling(false)
+        }
+    }
 
     return (
         <Card>
@@ -658,30 +1110,50 @@ function AICustomizationStep({ formData, setFormData, onNext, onBack, isSaving }
             <CardContent className="space-y-6">
                 <div className="space-y-3">
                     <Label>Voice Selection</Label>
-                    {voices.map((voice) => (
-                        <label
-                            key={voice.id}
-                            className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
-                        >
-                            <div className="flex items-center gap-3">
-                                <input
-                                    type="radio"
-                                    name="voice"
-                                    value={voice.id}
-                                    checked={formData.voiceId === voice.id}
-                                    onChange={(e) => setFormData({ ...formData, voiceId: e.target.value })}
-                                    className="rounded-full"
-                                />
-                                <div>
-                                    <p className="font-medium">{voice.name}</p>
-                                    <p className="text-sm text-muted-foreground">{voice.description}</p>
+                    {isLoadingVoices ? (
+                        <div className="space-y-2">
+                            {[1, 2, 3].map(i => (
+                                <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />
+                            ))}
+                        </div>
+                    ) : (
+                        voices.map((voice) => (
+                            <label
+                                key={voice.id}
+                                className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-colors ${formData.voiceId === voice.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'}`}
+                            >
+                                <div className="flex items-center gap-3">
+                                    <input
+                                        type="radio"
+                                        name="voice"
+                                        value={voice.id}
+                                        checked={formData.voiceId === voice.id}
+                                        onChange={(e) => setFormData({
+                                            ...formData,
+                                            voiceId: e.target.value,
+                                            voiceProvider: voice.provider
+                                        })}
+                                        className="h-4 w-4 rounded-full border-gray-300 text-primary focus:ring-primary"
+                                    />
+                                    <div>
+                                        <p className="font-medium text-sm">{voice.name}</p>
+                                        <p className="text-xs text-muted-foreground">{voice.description}</p>
+                                    </div>
                                 </div>
-                            </div>
-                            <Button variant="ghost" size="sm">
-                                <Play className="h-4 w-4" />
-                            </Button>
-                        </label>
-                    ))}
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className={isPlaying === voice.id ? 'text-primary' : ''}
+                                    onClick={(e) => {
+                                        e.preventDefault()
+                                        playVoicePreview(voice.id, voice.previewUrl)
+                                    }}
+                                >
+                                    {isPlaying === voice.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" />}
+                                </Button>
+                            </label>
+                        ))
+                    )}
                 </div>
 
                 <Separator />
@@ -703,14 +1175,15 @@ function AICustomizationStep({ formData, setFormData, onNext, onBack, isSaving }
                 <div className="space-y-2">
                     <Label>Conversation Tone</Label>
                     <div className="flex gap-2">
-                        {['Professional', 'Friendly', 'Casual'].map((tone) => (
+                        {['Professional', 'Friendly', 'Casual'].map((toneLabel) => (
                             <Button
-                                key={tone}
-                                variant={formData.tone === tone.toLowerCase() ? 'default' : 'outline'}
-                                onClick={() => setFormData({ ...formData, tone: tone.toLowerCase() })}
+                                key={toneLabel}
+                                type="button"
+                                variant={formData.tone === toneLabel.toLowerCase() ? 'default' : 'outline'}
+                                onClick={() => setFormData({ ...formData, tone: toneLabel.toLowerCase() })}
                                 className="flex-1"
                             >
-                                {tone}
+                                {toneLabel}
                             </Button>
                         ))}
                     </div>
@@ -728,20 +1201,81 @@ function AICustomizationStep({ formData, setFormData, onNext, onBack, isSaving }
                             <p className="text-sm text-muted-foreground">Hear how your AI sounds before going live</p>
                         </div>
                     </div>
-                    <Button className="w-full" size="lg">
-                        <Phone className="mr-2 h-4 w-4" />
-                        Make Test Call
-                    </Button>
+
+                    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button
+                                className="w-full"
+                                size="lg"
+                                disabled={!formData.phoneNumber}
+                            >
+                                <Phone className="mr-2 h-4 w-4" />
+                                Make Test Call
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Experience Your AI Receptionist</DialogTitle>
+                                <DialogDescription>
+                                    Enter your phone number below. We&apos;ll have your new AI receptionist call you so you can hear its voice and tone in action.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="test-phone">Your Phone Number</Label>
+                                    <Input
+                                        id="test-phone"
+                                        placeholder="+1 555 000 0000"
+                                        value={testPhoneNumber}
+                                        onChange={(e) => setTestPhoneNumber(e.target.value)}
+                                    />
+                                    <div className="space-y-1">
+                                        <p className="text-[10px] text-muted-foreground">
+                                            Use E.164 format (e.g., +15550000000).
+                                        </p>
+                                        <p className="text-[10px] text-amber-600 font-medium">
+                                            Note: Vapi native test calls are currently limited to US numbers (+1).
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button
+                                    onClick={handleTestCall}
+                                    disabled={isCalling || !testPhoneNumber}
+                                    className="w-full sm:w-auto"
+                                >
+                                    {isCalling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    {isCalling ? 'Calling...' : 'Call Me Now'}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    {!formData.phoneNumber && (
+                        <p className="text-xs text-destructive mt-2 text-center">
+                            Please select a phone number in the previous step to enable test calls.
+                        </p>
+                    )}
                 </div>
 
-                <div className="flex gap-3">
+                <div className="flex gap-3 mt-8">
                     <Button onClick={onBack} variant="outline" className="flex-1" disabled={isSaving}>
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Back
                     </Button>
                     <Button onClick={onNext} className="flex-1" disabled={isSaving}>
-                        {isSaving ? 'Saving...' : 'Finish Setup'}
-                        {!isSaving && <ArrowRight className="ml-2 h-4 w-4" />}
+                        {isSaving ? (
+                            <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Saving...
+                            </>
+                        ) : (
+                            <>
+                                Finish Setup
+                                <ArrowRight className="ml-2 h-4 w-4" />
+                            </>
+                        )}
                     </Button>
                 </div>
             </CardContent>

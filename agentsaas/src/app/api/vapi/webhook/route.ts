@@ -45,6 +45,16 @@ export async function POST(req: Request) {
         // Handle Tool Calls
         if (body.message?.type === 'tool-calls') {
             const toolCalls = body.message.toolCalls
+            const call = body.message.call
+            const phoneNumber = call?.customer?.number
+
+            // Fetch practice once for all tool calls in this message
+            let practiceId: string | undefined
+            if (phoneNumber) {
+                const { getPracticeByPhone } = await import('@/lib/services/vapi-service')
+                const practice = await getPracticeByPhone(phoneNumber)
+                practiceId = practice?.id
+            }
 
             // Vapi can send multiple tool calls, we'll map them (though usually one at a time)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,7 +66,7 @@ export async function POST(req: Request) {
                         const { startTime, endTime } = parameters
                         // Dynamic import to avoid circular dep issues if any
                         const { getAvailableSlots } = await import('@/lib/services/booking-service')
-                        const slots = await getAvailableSlots(startTime, endTime)
+                        const slots = await getAvailableSlots(startTime, endTime, practiceId)
                         return {
                             toolCallId: toolCall.id,
                             result: JSON.stringify({ slots })
@@ -70,7 +80,7 @@ export async function POST(req: Request) {
                         // Extract call ID if available
                         const callId = body.message?.call?.id
 
-                        const booking = await createBooking(patientName, email, startTime, timeZone, callId)
+                        const booking = await createBooking(patientName, email, phoneNumber || '', startTime, timeZone, callId, practiceId)
                         return {
                             toolCallId: toolCall.id,
                             result: JSON.stringify({ success: true, bookingId: booking.id })

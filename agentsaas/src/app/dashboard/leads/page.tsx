@@ -2,7 +2,11 @@ import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Plus, Layout } from "lucide-react"
-import { LeadsBoard } from "@/components/dashboard/leads-board"
+import dynamic from "next/dynamic"
+
+const LeadsBoard = dynamic(() => import("@/components/dashboard/leads-board").then(mod => mod.LeadsBoard), {
+    loading: () => <div className="h-[600px] w-full animate-pulse bg-muted rounded-lg" />
+})
 
 export default async function LeadsPage() {
     const supabase = await createClient()

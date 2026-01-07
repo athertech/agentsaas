@@ -1,8 +1,12 @@
 import { createClient } from "@/lib/supabase/server"
-import { CallTable } from "@/components/calls/call-table"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { PhoneIncoming, Clock, CheckCircle, TrendingUp } from "lucide-react"
 import { OnboardingSuccessModal } from "@/components/onboarding/success-modal"
+import dynamic from 'next/dynamic'
+
+const CallTable = dynamic(() => import("@/components/calls/call-table").then(mod => mod.CallTable), {
+    loading: () => <div className="h-48 w-full animate-pulse bg-muted rounded-lg" />
+})
 
 export default async function DashboardPage() {
     const supabase = await createClient()
@@ -16,8 +20,8 @@ export default async function DashboardPage() {
 
     // Quick Metrics (Mocked for now, but logical)
     const totalCalls = calls?.length || 0
-    const completedCalls = calls?.filter(c => c.status === 'completed').length || 0
-    const minutesSaved = Math.round((calls?.reduce((acc, c) => acc + (c.duration_seconds || 0), 0) || 0) / 60)
+    const completedCalls = calls?.filter((c: any) => c.status === 'completed').length || 0
+    const minutesSaved = Math.round((calls?.reduce((acc: number, c: any) => acc + (c.duration_seconds || 0), 0) || 0) / 60)
 
     return (
         <div className="space-y-8">
@@ -32,7 +36,7 @@ export default async function DashboardPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{totalCalls}</div>
-                        <p className="text-xs text-muted-foreground mt-1">+20.1% from last month</p>
+                        <p className="text-xs text-muted-foreground mt-1">Total inquiries handled</p>
                     </CardContent>
                 </Card>
                 <Card className="shadow-soft hover:shadow-soft-hover transition-all border-border/50">
@@ -42,7 +46,7 @@ export default async function DashboardPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{completedCalls}</div>
-                        <p className="text-xs text-muted-foreground mt-1">+12 since yesterday</p>
+                        <p className="text-xs text-muted-foreground mt-1">Confirmed appointments</p>
                     </CardContent>
                 </Card>
                 <Card className="shadow-soft hover:shadow-soft-hover transition-all border-border/50">
@@ -61,8 +65,8 @@ export default async function DashboardPage() {
                         <TrendingUp className="h-4 w-4 text-orange-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">98.2%</div>
-                        <p className="text-xs text-muted-foreground mt-1 text-green-600">+4.1% vs average</p>
+                        <div className="text-2xl font-bold">--%</div>
+                        <p className="text-xs text-muted-foreground mt-1">Waiting for more data</p>
                     </CardContent>
                 </Card>
             </div>

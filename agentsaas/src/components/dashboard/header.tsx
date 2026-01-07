@@ -72,12 +72,6 @@ export function DashboardHeader({ userEmail }: DashboardHeaderProps) {
                             </Link>
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem asChild>
-                            <Link href="/dashboard/onboarding" className="flex items-center gap-2 cursor-pointer text-muted-foreground">
-                                <Settings className="h-4 w-4" />
-                                Onboarding
-                            </Link>
-                        </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
 

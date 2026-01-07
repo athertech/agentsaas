@@ -6,7 +6,13 @@ import { Label } from "@/components/ui/label"
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
-export default function LoginPage() {
+export default async function LoginPage(props: {
+    searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+    const searchParams = await props.searchParams
+    const error = searchParams.error as string | undefined
+    const message = searchParams.message as string | undefined
+
     return (
         <div className="flex min-h-screen flex-col items-center justify-center bg-secondary/30 px-4 py-12 sm:px-6 lg:px-8">
 
@@ -29,6 +35,17 @@ export default function LoginPage() {
             </div>
 
             <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-[400px]">
+                {error && (
+                    <div className="mb-4 p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm font-medium animate-in fade-in slide-in-from-top-2">
+                        {error}
+                    </div>
+                )}
+                {message && (
+                    <div className="mb-4 p-4 rounded-lg bg-primary/10 border border-primary/20 text-primary text-sm font-medium animate-in fade-in slide-in-from-top-2">
+                        {message}
+                    </div>
+                )}
+
                 <Card className="shadow-soft border-border/60 bg-background/50 backdrop-blur-sm">
                     <form>
                         <CardContent className="pt-6 grid gap-4">
@@ -57,21 +74,16 @@ export default function LoginPage() {
                                 />
                             </div>
                         </CardContent>
-                        <CardFooter className="flex flex-col gap-3 pb-6">
+                        <CardFooter className="flex flex-col gap-3 pb-6 border-t pt-6 bg-secondary/5">
                             <Button formAction={login} className="w-full h-11 text-base shadow-soft hover:shadow-soft-hover transition-all">
                                 Sign in
                             </Button>
-                            <div className="relative w-full">
-                                <div className="absolute inset-0 flex items-center">
-                                    <span className="w-full border-t" />
-                                </div>
-                                <div className="relative flex justify-center text-xs uppercase">
-                                    <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
-                                </div>
-                            </div>
-                            <Button formAction={signup} variant="outline" className="w-full h-11 bg-background">
-                                Create an account
-                            </Button>
+                            <p className="text-center text-sm text-muted-foreground mt-2">
+                                Don&apos;t have an account?{" "}
+                                <Link href="/signup" className="text-primary font-medium hover:underline">
+                                    Sign up
+                                </Link>
+                            </p>
                         </CardFooter>
                     </form>
                 </Card>
